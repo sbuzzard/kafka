@@ -56,7 +56,7 @@ public final class BufferPool {
 
     /**
      * Create a new buffer pool
-     * 
+     *
      * @param memory The maximum amount of memory that this buffer pool can allocate
      * @param poolableSize The buffer size to cache in the free list rather than deallocating
      * @param metrics instance of Metrics
@@ -84,15 +84,15 @@ public final class BufferPool {
     /**
      * Allocate a buffer of the given size. This method blocks if there is not enough memory and the buffer pool
      * is configured with blocking mode.
-     * 
+     *
      * @param size The buffer size to allocate in bytes
-     * @param maxTimeToBlock The maximum time in milliseconds to block for buffer memory to be available
+     * @param maxTimeToBlockMs The maximum time in milliseconds to block for buffer memory to be available
      * @return The buffer
      * @throws InterruptedException If the thread is interrupted while blocked
      * @throws IllegalArgumentException if size is larger than the total memory controlled by the pool (and hence we would block
      *         forever)
      */
-    public ByteBuffer allocate(int size, long maxTimeToBlock) throws InterruptedException {
+    public ByteBuffer allocate(int size, long maxTimeToBlockMs) throws InterruptedException {
         if (size > this.totalMemory)
             throw new IllegalArgumentException("Attempt to allocate " + size
                                                + " bytes, but there is a hard limit of "
@@ -120,16 +120,31 @@ public final class BufferPool {
                 int accumulated = 0;
                 ByteBuffer buffer = null;
                 Condition moreMemory = this.lock.newCondition();
+                long remainingTimeToBlockNs = TimeUnit.MILLISECONDS.toNanos(maxTimeToBlockMs);
                 this.waiters.addLast(moreMemory);
                 // loop over and over until we have a buffer or have reserved
                 // enough memory to allocate one
                 while (accumulated < size) {
-                    long startWait = time.nanoseconds();
-                    if (!moreMemory.await(maxTimeToBlock, TimeUnit.MILLISECONDS))
-                        throw new TimeoutException("Failed to allocate memory within the configured max blocking time");
-                    long endWait = time.nanoseconds();
-                    this.waitTime.record(endWait - startWait, time.milliseconds());
+                    long startWaitNs = time.nanoseconds();
+                    long timeNs;
+                    boolean waitingTimeElapsed;
+                    try {
+                        waitingTimeElapsed = !moreMemory.await(remainingTimeToBlockNs, TimeUnit.NANOSECONDS);
+                    } catch (InterruptedException e) {
+                        this.waiters.remove(moreMemory);
+                        throw e;
+                    } finally {
+                        long endWaitNs = time.nanoseconds();
+                        timeNs = Math.max(0L, endWaitNs - startWaitNs);
+                        this.waitTime.record(timeNs, time.milliseconds());
+                    }
 
+                    if (waitingTimeElapsed) {
+                        this.waiters.remove(moreMemory);
+                        throw new TimeoutException("Failed to allocate memory within the configured max blocking time " + maxTimeToBlockMs + " ms.");
+                    }
+
+                    remainingTimeToBlockNs -= timeNs;
                     // check if we can satisfy this request from the free list,
                     // otherwise allocate memory
                     if (accumulated == 0 && size == this.poolableSize && !this.free.isEmpty()) {
@@ -184,7 +199,7 @@ public final class BufferPool {
     /**
      * Return buffers to the pool. If they are of the poolable size add them to the free list, otherwise just mark the
      * memory as free.
-     * 
+     *
      * @param buffer The buffer to return
      * @param size The size of the buffer to mark as deallocated, note that this maybe smaller than buffer.capacity
      *             since the buffer may re-allocate itself during in-place compression
@@ -258,5 +273,9 @@ public final class BufferPool {
      */
     public long totalMemory() {
         return this.totalMemory;
+    }
+    // package-private method used only for testing
+    Deque<Condition> waiters() {
+        return this.waiters;
     }
 }
