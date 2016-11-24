@@ -5,7 +5,7 @@
  * The ASF licenses this file to You under the Apache License, Version 2.0
  * (the "License"); you may not use this file except in compliance with
  * the License.  You may obtain a copy of the License at
- * 
+ *
  *    http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
@@ -30,7 +30,7 @@ object FAILED extends State
  * override makeNext and call allDone() when there is no more items
  */
 abstract class IteratorTemplate[T] extends Iterator[T] with java.util.Iterator[T] {
-  
+
   private var state: State = NOT_READY
   private var nextItem = null.asInstanceOf[T]
 
@@ -42,13 +42,13 @@ abstract class IteratorTemplate[T] extends Iterator[T] with java.util.Iterator[T
       throw new IllegalStateException("Expected item but none found.")
     nextItem
   }
-  
+
   def peek(): T = {
     if(!hasNext())
       throw new NoSuchElementException()
     nextItem
   }
-  
+
   def hasNext(): Boolean = {
     if(state == FAILED)
       throw new IllegalStateException("Iterator is in failed state")
@@ -58,9 +58,9 @@ abstract class IteratorTemplate[T] extends Iterator[T] with java.util.Iterator[T
       case _ => maybeComputeNext()
     }
   }
-  
+
   protected def makeNext(): T
-  
+
   def maybeComputeNext(): Boolean = {
     state = FAILED
     nextItem = makeNext()
@@ -71,13 +71,13 @@ abstract class IteratorTemplate[T] extends Iterator[T] with java.util.Iterator[T
       true
     }
   }
-  
+
   protected def allDone(): T = {
     state = DONE
     null.asInstanceOf[T]
   }
-  
-  def remove = 
+
+  override def remove =
     throw new UnsupportedOperationException("Removal not supported")
 
   protected def resetState() {
